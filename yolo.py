@@ -7,6 +7,7 @@ Run a YOLO_v3 style detection model on test images.
 import colorsys
 import os
 from timeit import default_timer as timer
+import csv
 
 import numpy as np
 from keras import backend as K
@@ -82,7 +83,59 @@ class YOLO(object):
                 len(self.class_names), self.input_image_shape,
                 score_threshold=self.score, iou_threshold=self.iou)
         return boxes, scores, classes
+    def detect_image_box(self, image):
+        start = timer()
 
+        if self.model_image_size != (None, None):
+            assert self.model_image_size[0]%32 == 0, 'Multiples of 32 required'
+            assert self.model_image_size[1]%32 == 0, 'Multiples of 32 required'
+            boxed_image = letterbox_image(image, tuple(reversed(self.model_image_size)))
+        else:
+            new_image_size = (image.width - (image.width % 32),
+                              image.height - (image.height % 32))
+            boxed_image = letterbox_image(image, new_image_size)
+        image_data = np.array(boxed_image, dtype='float32')
+
+        print(image_data.shape)
+        image_data /= 255.
+        image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
+
+        out_boxes, out_scores, out_classes = self.sess.run(
+            [self.boxes, self.scores, self.classes],
+            feed_dict={
+                self.yolo_model.input: image_data,
+                self.input_image_shape: [image.size[1], image.size[0]],
+                K.learning_phase(): 0
+            })
+        nn=len(out_boxes)
+        car_boxes=[]
+        for p in range(nn):
+            if out_classes[p]==2:
+                car_boxes.append(out_boxes[p])
+
+        print('Found {} boxes for {}'.format(len(car_boxes), 'img'))
+
+        font = ImageFont.truetype(font='font/FiraMono-Medium.otf',
+                    size=np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
+        thickness = (image.size[0] + image.size[1]) // 300
+        
+        nnc=len(car_boxes)
+        bbx=[]
+        for box in car_boxes:
+            top, left, bottom, right = box
+            top = max(0, np.floor(top + 0.5).astype('int32'))
+            left = max(0, np.floor(left + 0.5).astype('int32'))
+            bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
+            right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
+            w=abs(right-left)
+            h=abs(bottom-top)
+            #print(label, (x, y), (w, h))
+            ppx= str(left)+str("_")+str(top)+str("_")+str(w)+str("_")+str(h)+str(";")
+            
+            bbx.append(ppx)
+        print(bbx)
+        return bbx
+    
     def detect_image(self, image):
         start = timer()
 
@@ -194,8 +247,21 @@ def detect_video(yolo, video_path, output_path=""):
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
     yolo.close_session()
-
-
+def detect_game(yolo):
+    csvFile = open("test.csv", "w")
+    writer = csv.writer(csvFile)
+    writer.writerow(["name","coordinate"])
+    path="./test_a/"
+    filenames=os.listdir(path)
+    for filename in filenames:
+        filepath=str(path)+str(filename)
+        image=Image.open(filepath)
+        box = yolo.detect_image_box(image)
+        pp=[filename,box]
+        writer.writerow(pp)
+    csvFile.close()
+    yolo.close_session()
+    
 def detect_img(yolo):
     while True:
         img = input('Input image filename:')
@@ -212,4 +278,5 @@ def detect_img(yolo):
 
 
 if __name__ == '__main__':
-    detect_img(YOLO())
+    #detect_img(YOLO())
+    detect_game(YOLO())
